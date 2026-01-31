@@ -1,0 +1,377 @@
+{
+  "name": "Internship monitoring",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "YOUR ID",
+      "name": "When clicking ‘Test workflow’",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        620,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "startups",
+        "returnAll": true
+      },
+      "id": "YOUR SUPABASE ID",
+      "name": "Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        880,
+        280
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "SUPABASE API KEY",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "f4797759-b44f-4127-ae02-a43471f2ec45",
+      "name": "Replace Me",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1340,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.career_url }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "Mozilla/5.0"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          }
+        }
+      },
+      "id": "9b798b70-61a3-4df5-a5e6-246c750e4f6f",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1340,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash-lite",
+        "options": {}
+      },
+      "id": "0a69abd4-49fd-4c0a-b201-59283ef8e9c1",
+      "name": "Google Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1760,
+        300
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "YOUR GEMINI KEY",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const inputData = $input.all()[0].json;\nlet rawText = inputData.text || \"[]\";\n\n// Nettoyage standard\nrawText = rawText.replace(/```json/g, \"\").replace(/```/g, \"\").trim();\n\nlet newJobs = [];\ntry {\n    newJobs = JSON.parse(rawText);\n} catch (e) {\n    newJobs = []; \n}\n\nconst startupContext = $('Split In Batches').item.json;\nconst startupName = startupContext.name || \"Sans Nom\";\nconst oldJobs = startupContext.current_jobs || [];\n\n// --- LA MAGIE (CORRIGÉE POUR LES OBJETS) ---\n// On filtre : on garde le job SEULEMENT SI on ne trouve pas d'équivalent (Même titre ET Même lieu) dans oldJobs\nconst newlySpotted = newJobs.filter(newJob => {\n    const exists = oldJobs.some(oldJob => \n        oldJob.title === newJob.title && \n        oldJob.location === newJob.location\n    );\n    return !exists; // Si ça n'existe pas, on garde (c'est nouveau)\n});\n\nconst hasChanged = newlySpotted.length > 0;\n\n// Formatage pour Slack : Tiret + Retour à la ligne (\\n)\nconst newlySpottedText = newlySpotted\n    .map(job => `• ${job.title} (${job.location})`)\n    .join(\"\\n\");\n\nreturn [{\n    json: {\n        startup_name: startupName,\n        has_changed: hasChanged,\n        new_jobs: newJobs,       // La liste COMPLÈTE (pour écraser l'ancienne dans Supabase)\n        old_jobs: oldJobs,\n        newly_spotted: newlySpotted, // Juste les nouveaux (pour info)\n        newly_spotted_text: newlySpottedText // Le texte formaté pour Slack\n    }\n}];"
+      },
+      "id": "0622979b-05a8-4416-90f0-43e250b39edd",
+      "name": "Code",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1960,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "1c24df84-a661-468b-98a4-468c746b8875",
+      "name": "Split In Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1120,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "ae479802-5717-4ea8-a0d2-216814d13f32",
+              "leftValue": "={{ $json.has_changed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "3e74bbdf-686a-408d-aaf6-b0cc6bec116b",
+      "name": "If",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2180,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "startups",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "name",
+              "condition": "eq",
+              "keyValue": "={{ $json.startup_name }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "current_jobs",
+              "fieldValue": "={{ $json.new_jobs }}"
+            }
+          ]
+        }
+      },
+      "id": "YOUR SUPABASE ID",
+      "name": "Supabase1",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        2420,
+        40
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "z35wGsnpUo2jS1U9",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#jobs-update",
+          "mode": "name"
+        },
+        "text": "=🚨 *Nouveau(x) poste(s) détecté(s) chez {{ $json.name }} !* 🚨\n\nLes offres suivantes viennent d'être publiées :\n👉 \n{{ $('If').item.json.newly_spotted_text }}\n\n_Vérifie les détails ici : {{ $('Split In Batches').item.json.career_url }}",
+        "otherOptions": {}
+      },
+      "id": "YOUR SLACK ID",
+      "name": "Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        2640,
+        40
+      ],
+      "webhookId": "9f434bde-b9fa-460d-967b-0d9753cb48a7",
+      "credentials": {
+        "slackApi": {
+          "id": "xQoGdgdOqv5chUas",
+          "name": "Slack account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "RÔLE : Expert en extraction de données JSON.\n\nMISSION : Extrais les jobs du HTML.\n\nRÈGLES CRITIQUES :\n1. FORMAT : Réponds UNIQUEMENT avec le JSON brut.\n2. PAS DE MARKDOWN : Ne commence pas par ```json. Ne finis pas par ```. Juste [ et ].\n3. LANGUE DES CLÉS : Utilise EXCLUSIVEMENT les clés anglaises \"title\" et \"location\". Ne traduis JAMAIS ces clés en \"titre\" ou \"localisation\".\n4. CONTENU : \n   - title: Nom du poste.\n   - location: Ville/Pays.\n\nExemple de sortie attendue :\n[{\"title\": \"Account Executive\", \"location\": \"Paris\"}]",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "MISSION : Extrais la liste de TOUS les postes. FORMAT : Un tableau JSON d'objets. STRUCTURE :  [   { \"Le nom du poste\",\"Paris\", \"San Francisco\" \"New York\" ou une autre ville si tu le vois ou \"Remote\" } ]"
+            },
+            {
+              "type": "HumanMessagePromptTemplate",
+              "message": "={{ $json.data }}"
+            }
+          ]
+        }
+      },
+      "id": "de0d8be0-fc64-4df6-bdbc-0874e3e3c2dc",
+      "name": "Basic LLM Chain",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        1580,
+        100
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Test workflow’": {
+      "main": [
+        [
+          {
+            "node": "Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Replace Me": {
+      "main": [
+        [
+          {
+            "node": "Split In Batches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split In Batches": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Replace Me",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Supabase1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supabase1": {
+      "main": [
+        [
+          {
+            "node": "Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "24b9ad1d-c3ee-490e-8b70-d38dafed605f",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "XX"
+  },
+  "id": "pTOogzTnQXJiOVf8",
+  "tags": []
+}
