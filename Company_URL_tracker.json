@@ -1,44 +1,184 @@
-const inputData = $input.all()[0].json;
-let rawText = inputData.text || "[]";
-
-// Nettoyage standard
-rawText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
-
-let newJobs = [];
-try {
-    newJobs = JSON.parse(rawText);
-} catch (e) {
-    newJobs = []; 
-}
-
-const startupContext = $('Split In Batches').item.json;
-const startupName = startupContext.name || "Sans Nom";
-const oldJobs = startupContext.current_jobs || [];
-
-// --- LA MAGIE (CORRIGÉE POUR LES OBJETS) ---
-// On filtre : on garde le job SEULEMENT SI on ne trouve pas d'équivalent (Même titre ET Même lieu) dans oldJobs
-const newlySpotted = newJobs.filter(newJob => {
-    const exists = oldJobs.some(oldJob => 
-        oldJob.title === newJob.title && 
-        oldJob.location === newJob.location
-    );
-    return !exists; // Si ça n'existe pas, on garde (c'est nouveau)
-});
-
-const hasChanged = newlySpotted.length > 0;
-
-// Formatage pour Slack : Tiret + Retour à la ligne (\n)
-const newlySpottedText = newlySpotted
-    .map(job => `• ${job.title} (${job.location})`)
-    .join("\n");
-
-return [{
-    json: {
-        startup_name: startupName,
-        has_changed: hasChanged,
-        new_jobs: newJobs,       // La liste COMPLÈTE (pour écraser l'ancienne dans Supabase)
-        old_jobs: oldJobs,
-        newly_spotted: newlySpotted, // Juste les nouveaux (pour info)
-        newly_spotted_text: newlySpottedText // Le texte formaté pour Slack
+{
+  "name": "Company URL tracker",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "test",
+        "options": {}
+      },
+      "id": "839d132e-d075-4cc4-956a-9b19eff43cd7",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ],
+      "webhookId": "e968cbea-edad-4bdf-8968-ed5077a146cf"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://google.serper.dev/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-KEY",
+              "value": ""
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"q\": \"{{ $json.body.record.name }} startup careers page official ashby lever greenhouse\",\n  \"gl\": \"fr\"\n}",
+        "options": {}
+      },
+      "id": "a9d98894-8ca3-4813-be44-1f865c2b836e",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        920,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash-lite",
+        "options": {}
+      },
+      "id": "607a006e-b54a-4ba1-9a44-486a5d2262d6",
+      "name": "Google Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1420,
+        460
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "startups",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "id",
+              "condition": "eq",
+              "keyValue": "={{ $('Webhook').item.json.body.record.id }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "career_url",
+              "fieldValue": "={{ $json.text }}"
+            }
+          ]
+        }
+      },
+      "id": "3c88217d-227a-4728-bbd0-dbe86a4d5feb",
+      "name": "Supabase",
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1640,
+        300
+      ],
+      "credentials": {
+        "supabaseApi": {
+          "id": "",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "Tu es un expert en sourcing de talents. Ta mission est d'extraire l'URL la plus pertinente pour trouver les offres d'emploi d'une entreprise à partir de résultats Google. Tu dois privilégier les plateformes de recrutement directes (ATS).",
+        "messages": {
+          "messageValues": [
+            {
+              "message": "=Voici les résultats de recherche Google pour la startup : {{ $node[\"Webhook\"].json.body.record.name }}  Résultats :{{ $json.organic }} Mission : 1. Identifie l'URL de la page carrière principale. 2. PRIORITÉ ABSOLUE : Si tu vois une URL contenant \"ashbyhq.com/nom de l'entreprise et rien après\", \"lever.co\", \"greenhouse.io\" ou \"workable.com\", choisis celle-là en priorité. 3. Sinon, choisis l'URL \"Careers\" du site officiel. 4. ÉLIMINE les articles de blog, LinkedIn ou les pages de comparaison (ex: Lever vs Ashby).  RÈGLE D'OR : Réponds UNIQUEMENT avec l'URL brute. Pas de texte avant, pas de texte après, pas de guillemets."
+            }
+          ]
+        }
+      },
+      "id": "da123bee-6609-4763-968f-7a877a029696",
+      "name": "Basic LLM Chain",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.4,
+      "position": [
+        1260,
+        300
+      ]
     }
-}];
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "5eda8495-2a8f-4d05-a2fc-d66b04e69f36",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "2b908bb7b6657d085b1f267d39bdc6db5a12243035e1a0e3ccfd53cc5e5854ac"
+  },
+  "id": "NRWauQZ6C4uMHo0u",
+  "tags": []
+}
